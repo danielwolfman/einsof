@@ -5,8 +5,8 @@ interface GameCanvasProps {
     onGameOver: () => void;
 }
 
-const INITIAL_SPEED = 5;
-const SPEED_INCREMENT = 0.002;
+const INITIAL_SPEED = 0.05;
+const SPEED_INCREMENT = 0.0002;
 const SPACESHIP_WIDTH = 160;
 const SPACESHIP_HEIGHT = 128;
 const SPACESHIP_SPRITE = process.env.PUBLIC_URL + '/spaceship-sprite.png';
@@ -19,6 +19,35 @@ const CAMERA_ANGLE_DEG = 60;
 const CAMERA_ANGLE_RAD = (CAMERA_ANGLE_DEG * Math.PI) / 180;
 const STAR_WARP_THRESHOLD = 40;
 const STAR_WARP_MAX = 40;
+
+// Asteroid configuration constants
+const ASTEROID_COUNT = 20;
+const ASTEROID_MIN_SIZE = 5000;
+const ASTEROID_SIZE_VARIANCE = 100000;
+const ASTEROID_MIN_Z_FACTOR = 500; // how many times STARFIELD_DEPTH for min spawn distance
+const ASTEROID_MAX_Z_FACTOR = 1000; // how many times STARFIELD_DEPTH for max spawn distance
+const ASTEROID_OUTER_POINTS = 18;
+const ASTEROID_OUTER_POINTS_VARIANCE = 6;
+const ASTEROID_EXTRA_HOLES_MIN = 1;
+const ASTEROID_EXTRA_HOLES_MAX = 3;
+const ASTEROID_SPIN_MIN = 0.001; // radians per frame (increase for faster spin)
+const ASTEROID_SPIN_MAX = 0.004;
+const ASTEROID_SPEED_FACTOR = 100.0; // 1.0 = same as starfield, >1.0 = faster, <1.0 = slower
+
+// Asteroid type with multiple holes
+interface Asteroid {
+    x: number; // 3D X
+    y: number; // 3D Y
+    z: number; // 3D Z (distance from camera)
+    size: number; // base radius
+    speed: number;
+    outer: Array<{ x: number; y: number }>;
+    holes: Array<Array<{ x: number; y: number }>>; // multiple holes
+    color: string;
+    angle: number; // rotation angle
+    spin: number; // rotation speed
+    opacity: number; // fade-in opacity
+}
 
 const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver }) => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -35,7 +64,6 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         height: SPACESHIP_HEIGHT
     });
     // Placeholder for asteroids and stars
-    const asteroids: Array<{ x: number; y: number; radius: number }> = [];
     const starsRef = useRef<Array<{
         x: number; // 3D X
         y: number; // 3D Y
@@ -49,6 +77,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
     const lastStarfieldChangeRef = useRef<number>(Date.now());
     const spaceshipImgRef = useRef<HTMLImageElement | null>(null);
     const lastLogTimeRef = useRef<number>(0);
+    // Asteroids as a ref for mutability
+    const asteroidsRef = useRef<Asteroid[]>([]);
 
     // Add style to prevent scrollbars
     useEffect(() => {
@@ -224,6 +254,44 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
                 star.py = undefined;
             }
         });
+        // Asteroid movement (like stars)
+        asteroidsRef.current.forEach(asteroid => {
+            asteroid.z -= speedRef.current * asteroid.speed * 1.5;
+            asteroid.angle += asteroid.spin;
+            // Fade in: opacity increases as z decreases from spawnZ to visibleZ
+            const spawnZ = STARFIELD_DEPTH * ASTEROID_MAX_Z_FACTOR;
+            const visibleZ = STARFIELD_DEPTH * (ASTEROID_MAX_Z_FACTOR - 0.5 * (ASTEROID_MAX_Z_FACTOR - ASTEROID_MIN_Z_FACTOR));
+            if (asteroid.z > visibleZ) {
+                // Fade in from 0 to 1 as z goes from spawnZ to visibleZ
+                const t = 1 - (asteroid.z - visibleZ) / (spawnZ - visibleZ);
+                asteroid.opacity = Math.min(1, Math.max(0, t));
+            } else {
+                asteroid.opacity = 1;
+            }
+            // Project to 2D
+            const proj = projectStar(asteroid, canvas, undefined, undefined);
+            // Respawn if past camera or off screen
+            if (
+                asteroid.z < 10 ||
+                proj.x < -asteroid.size || proj.x > canvas.width + asteroid.size ||
+                proj.y < -asteroid.size || proj.y > canvas.height + asteroid.size
+            ) {
+                // Regenerate asteroid at far z
+                const scaled = getScaledSpaceshipSize();
+                const newAst = generateAsteroid3D(canvas, scaled.width, scaled.height);
+                asteroid.x = newAst.x;
+                asteroid.y = newAst.y;
+                asteroid.z = newAst.z; // use very far z
+                asteroid.size = newAst.size;
+                asteroid.speed = newAst.speed;
+                asteroid.outer = newAst.outer;
+                asteroid.holes = newAst.holes;
+                asteroid.color = newAst.color;
+                asteroid.angle = newAst.angle;
+                asteroid.spin = newAst.spin;
+                asteroid.opacity = 0; // Reset opacity for fade-in
+            }
+        });
         // Dynamically randomize star count every 4 seconds or as speed increases
         const now = Date.now();
         if (now - lastStarfieldChangeRef.current > 4000) {
@@ -264,11 +332,13 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         throttledLog();
     };
 
-    // Project 3D star to 2D canvas (improved)
-    function projectStar(star: { x: number; y: number; z: number }, canvas: HTMLCanvasElement, fov: number, aspect: number) {
-        // Project X/Y with perspective
-        const px = (star.x / (star.z * fov)) * canvas.width / 2 * aspect + canvas.width / 2;
-        const py = (star.y / (star.z * fov)) * canvas.height / 2 + canvas.height / 2;
+    // Project 3D asteroid/star to 2D
+    function projectStar(star: { x: number; y: number; z: number }, canvas: HTMLCanvasElement, fov?: number, aspect?: number) {
+        // Use provided fov/aspect or compute if undefined
+        const _fov = fov !== undefined ? fov : Math.tan(CAMERA_ANGLE_RAD / 2);
+        const _aspect = aspect !== undefined ? aspect : canvas.width / canvas.height;
+        const px = (star.x / (star.z * _fov)) * canvas.width / 2 * _aspect + canvas.width / 2;
+        const py = (star.y / (star.z * _fov)) * canvas.height / 2 + canvas.height / 2;
         return { x: px, y: py };
     }
 
@@ -333,8 +403,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         if (context && canvas) {
             // Draw enhanced starfield and background first
             drawStarfield(context, canvas, speedRef.current);
-            drawSpaceship(context);
             drawAsteroids(context);
+            drawSpaceship(context);
         }
     };
 
@@ -355,15 +425,140 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         }
     };
 
+    // Draw asteroids with 3D projection and improved style
     const drawAsteroids = (context: CanvasRenderingContext2D) => {
-        asteroids.forEach(asteroid => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const fov = Math.tan(CAMERA_ANGLE_RAD / 2);
+        const aspect = canvas.width / canvas.height;
+        // Draw asteroids sorted by z (closer ones drawn last, appear on top)
+        const sortedAsteroids = [...asteroidsRef.current].sort((a, b) => a.z - b.z);
+        sortedAsteroids.forEach(asteroid => {
+            const proj = projectStar(asteroid, canvas, fov, aspect);
+            context.save();
+            // Use asteroid.opacity for both fill and stroke
+            const asteroidAlpha = (asteroid.opacity !== undefined ? asteroid.opacity : 1) * 0.95;
+            context.globalAlpha = asteroidAlpha;
+            context.translate(proj.x, proj.y);
+            const scale = canvas.width / (asteroid.z * fov) * 0.5;
+            context.scale(scale, scale);
+            context.rotate(asteroid.angle);
+            context.shadowColor = 'rgba(0,0,0,0.4)';
+            context.shadowBlur = 12;
             context.beginPath();
-            context.arc(asteroid.x, asteroid.y, asteroid.radius, 0, Math.PI * 2);
-            context.fillStyle = 'gray';
-            context.fill();
+            context.moveTo(asteroid.outer[0].x, asteroid.outer[0].y);
+            asteroid.outer.forEach((pt, i) => { if (i > 0) context.lineTo(pt.x, pt.y); });
             context.closePath();
+            // Draw all holes
+            asteroid.holes.forEach(hole => {
+                context.moveTo(hole[0].x, hole[0].y);
+                for (let i = hole.length - 1; i >= 0; i--) {
+                    const pt = hole[i];
+                    context.lineTo(pt.x, pt.y);
+                }
+                context.closePath();
+            });
+            const grad = context.createRadialGradient(0, 0, asteroid.size * 0.2, 0, 0, asteroid.size);
+            grad.addColorStop(0, '#fff8');
+            grad.addColorStop(0.2, asteroid.color);
+            grad.addColorStop(1, '#222');
+            context.fillStyle = grad;
+            context.fill('evenodd');
+            // Stroke should also respect opacity
+            context.globalAlpha = asteroidAlpha;
+            context.lineWidth = 2;
+            context.strokeStyle = '#222';
+            context.stroke();
+            context.restore();
         });
     };
+
+    // Helper to generate a more organic asteroid with a smooth elliptical hole and random spin
+    function generateAsteroid3D(canvas: HTMLCanvasElement, spaceshipWidth: number, spaceshipHeight: number): Asteroid {
+        const fov = Math.tan(CAMERA_ANGLE_RAD / 2);
+        const aspect = canvas.width / canvas.height;
+        // 3D spawn position: spawn extremely far away for a long approach
+        // Force spawn at the maximum possible Z (very far)
+        const z = STARFIELD_DEPTH * ASTEROID_MAX_Z_FACTOR;
+        const sx = Math.random();
+        const sy = Math.random();
+        const x = ((sx - 0.5) * 2 * z * fov) / aspect;
+        const y = ((sy - 0.5) * 2 * z * fov);
+        // Make asteroids HUGE
+        const size = ASTEROID_MIN_SIZE + Math.random() * ASTEROID_SIZE_VARIANCE;
+        // Speed: align with starfield speed, but allow some variance if desired
+        const speed = ASTEROID_SPEED_FACTOR;
+        // Outer shape: jagged but smooth polygon
+        const points = ASTEROID_OUTER_POINTS + Math.floor(Math.random() * ASTEROID_OUTER_POINTS_VARIANCE);
+        const outer: Array<{ x: number; y: number }> = [];
+        for (let i = 0; i < points; i++) {
+            const angle = (i / points) * Math.PI * 2;
+            const r = size * (0.85 + Math.sin(angle * 3 + Math.random() * 2) * 0.08 + Math.random() * 0.12);
+            outer.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
+        }
+        // Multiple holes
+        const holes: Array<Array<{ x: number; y: number }>> = [];
+        // Main hole: random offset from center, but inside the asteroid
+        const mainHoleAngle = Math.random() * Math.PI * 2;
+        const mainHoleDist = size * 0.15 + Math.random() * size * 0.18; // not too close to edge
+        const mainHoleCx = Math.cos(mainHoleAngle) * mainHoleDist;
+        const mainHoleCy = Math.sin(mainHoleAngle) * mainHoleDist;
+        // Ensure the main hole is always large enough for the spaceship to fit
+        const minMainHoleW = Math.max(spaceshipWidth * 1.15, size * 0.28);
+        const minMainHoleH = Math.max(spaceshipHeight * 1.15, size * 0.28);
+        const maxMainHoleW = Math.max(minMainHoleW, size * 0.32);
+        const maxMainHoleH = Math.max(minMainHoleH, size * 0.32);
+        holes.push(generateAsteroidHole(mainHoleCx, mainHoleCy, minMainHoleW, minMainHoleH, maxMainHoleW, maxMainHoleH));
+        // Add extra holes, some smaller, some larger, at random positions
+        const extraHoles = ASTEROID_EXTRA_HOLES_MIN + Math.floor(Math.random() * (ASTEROID_EXTRA_HOLES_MAX - ASTEROID_EXTRA_HOLES_MIN + 1));
+        for (let i = 0; i < extraHoles; i++) {
+            // Random offset from center, but inside the asteroid
+            const angle = Math.random() * Math.PI * 2;
+            const dist = size * 0.2 + Math.random() * size * 0.5;
+            const cx = Math.cos(angle) * dist;
+            const cy = Math.sin(angle) * dist;
+            // Some holes are smaller than the ship, some are a good fit
+            const minW = spaceshipWidth * (0.5 + Math.random() * 0.7); // 0.5x to 1.2x ship width
+            const minH = spaceshipHeight * (0.5 + Math.random() * 0.7);
+            const maxW = Math.max(minW, size * 0.18 + Math.random() * size * 0.12);
+            const maxH = Math.max(minH, size * 0.18 + Math.random() * size * 0.12);
+            holes.push(generateAsteroidHole(cx, cy, minW, minH, maxW, maxH));
+        }
+        // Color: random brown/gray
+        const color = `hsl(${20 + Math.random() * 30}, 30%, ${35 + Math.random() * 20}%)`;
+        // Rotation
+        const angle = Math.random() * Math.PI * 2;
+        const spin = (Math.random() < 0.5 ? 1 : -1) * (ASTEROID_SPIN_MIN + Math.random() * (ASTEROID_SPIN_MAX - ASTEROID_SPIN_MIN));
+        const opacity = 0; // Start fully transparent
+        return { x, y, z, size, speed, outer, holes, color, angle, spin, opacity };
+    }
+
+    // Helper to generate a single hole (ellipse, slightly organic)
+    function generateAsteroidHole(cx: number, cy: number, minW: number, minH: number, maxW: number, maxH: number) {
+        const holeW = minW + Math.random() * (maxW - minW);
+        const holeH = minH + Math.random() * (maxH - minH);
+        const holeAngle = Math.random() * Math.PI * 2;
+        const holePoints = 18;
+        const arr: Array<{ x: number; y: number }> = [];
+        for (let i = 0; i < holePoints; i++) {
+            const angle = holeAngle + (i / holePoints) * Math.PI * 2;
+            const rw = holeW * (0.95 + Math.sin(angle * 2 + Math.random()) * 0.04) / 2;
+            const rh = holeH * (0.95 + Math.cos(angle * 2 + Math.random()) * 0.04) / 2;
+            arr.push({ x: cx + Math.cos(angle) * rw, y: cy + Math.sin(angle) * rh });
+        }
+        return arr;
+    }
+
+    // Example: generate a few asteroids on mount
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        asteroidsRef.current = [];
+        for (let i = 0; i < ASTEROID_COUNT; i++) {
+            const scaled = getScaledSpaceshipSize();
+            asteroidsRef.current.push(generateAsteroid3D(canvas, scaled.width, scaled.height));
+        }
+    }, []);
 
     return <canvas ref={canvasRef} />;
 };
