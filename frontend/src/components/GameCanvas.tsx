@@ -13,10 +13,11 @@ interface GameCanvasProps {
 }
 
 const INITIAL_SPEED = 0.05;
-const SPEED_INCREMENT = 0.0002;
+const SPEED_INCREMENT = 0.002;
 const SPACESHIP_WIDTH = 160;
 const SPACESHIP_HEIGHT = 128;
 const SPACESHIP_SPRITE = process.env.PUBLIC_URL + '/spaceship-sprite.png';
+const EXPLOSION_GIF = process.env.PUBLIC_URL + '/explosion.gif';
 
 // 3D starfield parameters
 const STAR_COUNT_MIN = 20;
@@ -41,7 +42,7 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
     const contextRef = useRef<CanvasRenderingContext2D | null>(null);
     const gameLoopRef = useRef<number | null>(null);
     const speedRef = useRef<number>(initialSpeed || INITIAL_SPEED);
-    const velocityRef = useRef({ x: 0 }); // Only left/right movement
+    const velocityRef = useRef({ x: 0, y: 0 }); // Updated for vertical movement
     // Spaceship is fixed at bottom center
     const spaceshipRef = useRef({
         x: 0,
@@ -67,6 +68,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
     const asteroidsRef = useRef<Asteroid[]>([]);
     const [gameOver, setGameOver] = React.useState(false);
     const runningRef = useRef(true);
+    // Explosion state
+    const [explosionPos, setExplosionPos] = React.useState<{ x: number; y: number; width: number; height: number } | null>(null);
+    const [showExplosion, setShowExplosion] = React.useState(false);
+    const explosionTimeoutRef = useRef<number | null>(null);
+    const scoreRef = useRef(0);
+    const [score, setScore] = React.useState(0);
+    // High score state
+    const [highScore, setHighScore] = React.useState(() => {
+        const saved = localStorage.getItem('highScore');
+        return saved ? parseInt(saved, 10) : 0;
+    });
 
     // Add style to prevent scrollbars
     useEffect(() => {
@@ -193,16 +205,17 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
     // Add keyboard controls for left/right movement (document-level)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
-            // Maneuver speed increases with game speed, capped
             const maneuverSpeed = Math.min(
                 BASE_MANEUVER_SPEED + (MAX_MANEUVER_SPEED - BASE_MANEUVER_SPEED) * Math.min(1, (speedRef.current - INITIAL_SPEED) / MANEUVER_RAMP),
                 MAX_MANEUVER_SPEED
             );
-            if (process.env.NODE_ENV === 'development' && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+            if (process.env.NODE_ENV === 'development' && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
                 console.log('[GameCanvas] speedRef.current:', speedRef.current, 'maneuverSpeed:', maneuverSpeed);
             }
             if (e.key === 'ArrowLeft') velocityRef.current.x = -maneuverSpeed;
             if (e.key === 'ArrowRight') velocityRef.current.x = maneuverSpeed;
+            if (e.key === 'ArrowUp') velocityRef.current.y = -maneuverSpeed;
+            if (e.key === 'ArrowDown') velocityRef.current.y = maneuverSpeed;
             // Restart game on Space if game over
             if (e.key === ' ' && gameOver) {
                 // Reset asteroids
@@ -224,12 +237,16 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
                 }
                 // Reset speed
                 speedRef.current = initialSpeed || INITIAL_SPEED;
+                // Reset score
+                scoreRef.current = 0;
+                setScore(0);
                 // Reset game over state
                 setGameOver(false);
             }
         };
         const handleKeyUp = (e: KeyboardEvent) => {
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') velocityRef.current.x = 0;
+            if (['ArrowLeft', 'ArrowRight'].includes(e.key)) velocityRef.current.x = 0;
+            if (['ArrowUp', 'ArrowDown'].includes(e.key)) velocityRef.current.y = 0;
         };
         document.addEventListener('keydown', handleKeyDown);
         document.addEventListener('keyup', handleKeyUp);
@@ -256,17 +273,22 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         if (!canvas) return;
         // Gradually increase speed
         speedRef.current += SPEED_INCREMENT;
+        // Increment score based on speed (or time)
+        scoreRef.current += 0.01 ; // Adjust multiplier as needed
         // Scale spaceship size every frame
         const scaled = getScaledSpaceshipSize();
         const spaceship = spaceshipRef.current;
         spaceship.width = scaled.width;
         spaceship.height = scaled.height;
         // Keep spaceship at bottom center
-        spaceship.y = Math.max(0, canvas.height - scaled.height - 40);
-        // Move spaceship left/right, clamp to screen
+        // spaceship.y = Math.max(0, canvas.height - scaled.height - 40);
+        // Move spaceship left/right and up/down, clamp to screen
         spaceship.x += velocityRef.current.x;
+        spaceship.y += velocityRef.current.y;
         if (spaceship.x < 0) spaceship.x = 0;
         if (spaceship.x + spaceship.width > canvas.width) spaceship.x = canvas.width - spaceship.width;
+        if (spaceship.y < 0) spaceship.y = 0;
+        if (spaceship.y + spaceship.height > canvas.height) spaceship.y = canvas.height - spaceship.height;
         // 3D starfield update
         const fov = Math.tan(CAMERA_ANGLE_RAD / 2);
         const aspect = canvas.width / canvas.height;
@@ -387,6 +409,8 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
             visibleAsteroids.length > 0 &&
             checkCollision(canvas, spaceship, visibleAsteroids, projectStar, fov, aspect)
         ) {
+            // Save last ship position for explosion overlay
+            setExplosionPos({ ...spaceship });
             setGameOver(true);
             if (onGameOver) onGameOver();
             if (gameLoopRef.current) cancelAnimationFrame(gameLoopRef.current);
@@ -394,19 +418,69 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         }
     };
 
+    // Show explosion only once for 1 second
+    useEffect(() => {
+        if (gameOver && explosionPos) {
+            setShowExplosion(true);
+            if (explosionTimeoutRef.current) {
+                clearTimeout(explosionTimeoutRef.current);
+            }
+            explosionTimeoutRef.current = window.setTimeout(() => {
+                setShowExplosion(false);
+            }, 800);
+        } else {
+            setShowExplosion(false);
+            if (explosionTimeoutRef.current) {
+                clearTimeout(explosionTimeoutRef.current);
+                explosionTimeoutRef.current = null;
+            }
+        }
+        // Cleanup on unmount
+        return () => {
+            if (explosionTimeoutRef.current) {
+                clearTimeout(explosionTimeoutRef.current);
+                explosionTimeoutRef.current = null;
+            }
+        };
+    }, [gameOver, explosionPos]);
+
+    // Remove explosion overlay on restart
+    useEffect(() => {
+        if (!gameOver) setExplosionPos(null);
+    }, [gameOver]);
+
     // In drawGame, always clear the canvas before drawing
     const drawGame = () => {
         const context = contextRef.current;
         const canvas = canvasRef.current;
         if (context && canvas) {
-            context.clearRect(0, 0, canvas.width, canvas.height); // <-- clear before drawing
+            context.clearRect(0, 0, canvas.width, canvas.height);
             const fov = Math.tan(CAMERA_ANGLE_RAD / 2);
             const aspect = canvas.width / canvas.height;
             drawStarfield(context, canvas, speedRef.current, starsRef.current);
             // Sort asteroids by z (closest first) before drawing
             asteroidsRef.current.sort((a, b) => a.z - b.z);
             drawAsteroids(context, canvas, asteroidsRef.current, projectStar, fov, aspect);
-            drawSpaceship(context, spaceshipRef.current, spaceshipImgRef.current);
+            // Draw score at top right (use scoreRef.current for live display)
+            context.save();
+            context.font = `bold 32px 'Press Start 2P', 'Arial', monospace`;
+            context.textAlign = 'right';
+            context.textBaseline = 'top';
+            context.fillStyle = '#fff';
+            context.strokeStyle = '#222';
+            context.lineWidth = 4;
+            const scoreText = `SCORE: ${Math.floor(scoreRef.current)}`;
+            context.strokeText(scoreText, canvas.width - 40, 32);
+            context.fillText(scoreText, canvas.width - 40, 32);
+            // Draw high score below score
+            const highScoreText = `HIGH: ${Math.floor(highScore)}`;
+            context.strokeText(highScoreText, canvas.width - 40, 80);
+            context.fillText(highScoreText, canvas.width - 40, 80);
+            context.restore();
+            // Only draw spaceship if not game over
+            if (!gameOver) {
+                drawSpaceship(context, spaceshipRef.current, spaceshipImgRef.current);
+            }
             if (gameOver) {
                 // Draw GAME OVER in arcade font
                 context.save();
@@ -448,7 +522,46 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         }
     }, []);
 
-    return <canvas ref={canvasRef} />;
+    // On game over, sync scoreRef to React state for final display
+    useEffect(() => {
+        if (gameOver) {
+            setScore(scoreRef.current);
+            // Update high score if needed
+            if (scoreRef.current > highScore) {
+                setHighScore(scoreRef.current);
+                localStorage.setItem('highScore', String(Math.floor(scoreRef.current)));
+            }
+        }
+    }, [gameOver]);
+
+    // Reset scoreRef and score on restart
+    useEffect(() => {
+        if (!gameOver) {
+            scoreRef.current = 0;
+            setScore(0);
+        }
+    }, [gameOver]);
+
+    return (
+        <>
+            <canvas ref={canvasRef} style={{ display: 'block' }} />
+            {showExplosion && explosionPos && (
+                <img
+                    src={EXPLOSION_GIF}
+                    alt="Explosion"
+                    style={{
+                        position: 'absolute',
+                        left: explosionPos.x,
+                        top: explosionPos.y,
+                        width: explosionPos.width,
+                        height: explosionPos.height,
+                        pointerEvents: 'none',
+                        zIndex: 10
+                    }}
+                />
+            )}
+        </>
+    );
 };
 
 export default GameCanvas;
