@@ -1,0 +1,10 @@
+{
+  "files": {
+    "main.js": "/einsof/static/js/main.f5443afe.js",
+    "index.html": "/einsof/index.html",
+    "main.f5443afe.js.map": "/einsof/static/js/main.f5443afe.js.map"
+  },
+  "entrypoints": [
+    "static/js/main.f5443afe.js"
+  ]
+}
