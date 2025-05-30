@@ -84,7 +84,7 @@ export function generateAsteroid3D(
     const sy = randCenterBias();
     const x = ((sx - 0.5) * 2 * z * fov) / aspect;
     const y = ((sy - 0.5) * 2 * z * fov);
-    const size = 500 + Math.random() * 1200; // much smaller asteroids for visibility
+    const size = 1000 + Math.random() * 2000; // Increased base size and range
     const speed = minSpeed + Math.random() * (maxSpeed - minSpeed);
     const points = 18 + Math.floor(Math.random() * 6);
     const outer: Array<{ x: number; y: number }> = [];
@@ -98,21 +98,24 @@ export function generateAsteroid3D(
     const mainHoleDist = size * 0.15 + Math.random() * size * 0.18;
     const mainHoleCx = Math.cos(mainHoleAngle) * mainHoleDist;
     const mainHoleCy = Math.sin(mainHoleAngle) * mainHoleDist;
-    const minMainHoleW = Math.max(spaceshipWidth * 1.15, size * 0.28);
-    const minMainHoleH = Math.max(spaceshipHeight * 1.15, size * 0.28);
-    const maxMainHoleW = Math.max(minMainHoleW, size * 0.32);
-    const maxMainHoleH = Math.max(minMainHoleH, size * 0.32);
+    // Ensure main hole is large enough for spaceship with padding
+    const minMainHoleW = Math.max(spaceshipWidth * 2, size * 0.35);
+    const minMainHoleH = Math.max(spaceshipHeight * 2, size * 0.35);
+    const maxMainHoleW = Math.max(minMainHoleW * 1.2, size * 0.45);
+    const maxMainHoleH = Math.max(minMainHoleH * 1.2, size * 0.45);
     holes.push(generateAsteroidHole(mainHoleCx, mainHoleCy, minMainHoleW, minMainHoleH, maxMainHoleW, maxMainHoleH));
+    
+    // Make secondary holes also potentially large enough for ship
     const extraHoles = 1 + Math.floor(Math.random() * (3 - 1 + 1));
     for (let i = 0; i < extraHoles; i++) {
         const angle = Math.random() * Math.PI * 2;
         const dist = size * 0.2 + Math.random() * size * 0.5;
         const cx = Math.cos(angle) * dist;
         const cy = Math.sin(angle) * dist;
-        const minW = spaceshipWidth * (0.5 + Math.random() * 0.7);
-        const minH = spaceshipHeight * (0.5 + Math.random() * 0.7);
-        const maxW = Math.max(minW, size * 0.18 + Math.random() * size * 0.12);
-        const maxH = Math.max(minH, size * 0.18 + Math.random() * size * 0.12);
+        const minW = Math.max(spaceshipWidth * 1.5, size * 0.25);
+        const minH = Math.max(spaceshipHeight * 1.5, size * 0.25);
+        const maxW = Math.max(minW * 1.2, size * 0.35);
+        const maxH = Math.max(minH * 1.2, size * 0.35);
         holes.push(generateAsteroidHole(cx, cy, minW, minH, maxW, maxH));
     }
     const color = `hsl(${20 + Math.random() * 30}, 30%, ${35 + Math.random() * 20}%)`;

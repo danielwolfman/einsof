@@ -77,10 +77,14 @@ export function checkCollision(
     width: spaceship.width,
     height: spaceship.height
   };
+
+  // Check each asteroid
   for (const asteroid of asteroids) {
     const proj = projectStar(asteroid, canvas, fov, aspect);
     const scale = canvas.width / (asteroid.z * fov) * 0.5;
     const angle = asteroid.angle;
+
+    // Transform asteroid outer polygon
     const poly = asteroid.outer.map((pt: { x: number; y: number }) => {
       const rx = Math.cos(angle) * pt.x - Math.sin(angle) * pt.y;
       const ry = Math.sin(angle) * pt.x + Math.cos(angle) * pt.y;
@@ -89,31 +93,84 @@ export function checkCollision(
         y: proj.y + ry * scale
       };
     });
-    const gridN = 5;
-    for (let gx = 0; gx < gridN; gx++) {
-      for (let gy = 0; gy < gridN; gy++) {
-        const px = rect.x + (gx + 0.5) * rect.width / gridN;
-        const py = rect.y + (gy + 0.5) * rect.height / gridN;
-        if (pointInPolygon({ x: px, y: py }, poly)) {
-          let inHole = false;
-          for (const hole of asteroid.holes) {
-            const holePoly = hole.map((pt: { x: number; y: number }) => {
-              const rx = Math.cos(angle) * pt.x - Math.sin(angle) * pt.y;
-              const ry = Math.sin(angle) * pt.x + Math.cos(angle) * pt.y;
-              return {
-                x: proj.x + rx * scale,
-                y: proj.y + ry * scale
-              };
-            });
-            if (pointInPolygon({ x: px, y: py }, holePoly)) {
-              inHole = true;
-              break;
-            }
-          }
-          if (!inHole) {
-            return true;
+
+    // Transform all holes
+    const transformedHoles = asteroid.holes.map(hole => 
+      hole.map((pt: { x: number; y: number }) => {
+        const rx = Math.cos(angle) * pt.x - Math.sin(angle) * pt.y;
+        const ry = Math.sin(angle) * pt.x + Math.cos(angle) * pt.y;
+        return {
+          x: proj.x + rx * scale,
+          y: proj.y + ry * scale
+        };
+      })
+    );
+
+    // Check if spaceship corners are inside the asteroid
+    const spaceshipCorners = [
+      { x: rect.x, y: rect.y },
+      { x: rect.x + rect.width, y: rect.y },
+      { x: rect.x, y: rect.y + rect.height },
+      { x: rect.x + rect.width, y: rect.y + rect.height }
+    ];
+
+    // Check each corner of the spaceship
+    for (const corner of spaceshipCorners) {
+      if (pointInPolygon(corner, poly)) {
+        // If corner is in asteroid, check if it's in any hole
+        let inHole = false;
+        for (const hole of transformedHoles) {
+          if (pointInPolygon(corner, hole)) {
+            inHole = true;
+            break;
           }
         }
+        // Only collide if not in a hole
+        if (!inHole) {
+          return true;
+        }
+      }
+    }
+
+    // Check center points of each spaceship edge
+    const edgeCenters = [
+      { x: rect.x + rect.width / 2, y: rect.y }, // top
+      { x: rect.x + rect.width / 2, y: rect.y + rect.height }, // bottom
+      { x: rect.x, y: rect.y + rect.height / 2 }, // left
+      { x: rect.x + rect.width, y: rect.y + rect.height / 2 } // right
+    ];
+
+    for (const point of edgeCenters) {
+      if (pointInPolygon(point, poly)) {
+        let inHole = false;
+        for (const hole of transformedHoles) {
+          if (pointInPolygon(point, hole)) {
+            inHole = true;
+            break;
+          }
+        }
+        if (!inHole) {
+          return true;
+        }
+      }
+    }
+
+    // Check center of spaceship
+    const center = {
+      x: rect.x + rect.width / 2,
+      y: rect.y + rect.height / 2
+    };
+    
+    if (pointInPolygon(center, poly)) {
+      let inHole = false;
+      for (const hole of transformedHoles) {
+        if (pointInPolygon(center, hole)) {
+          inHole = true;
+          break;
+        }
+      }
+      if (!inHole) {
+        return true;
       }
     }
   }

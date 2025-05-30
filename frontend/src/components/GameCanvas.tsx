@@ -43,6 +43,9 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
     const gameLoopRef = useRef<number | null>(null);
     const speedRef = useRef<number>(initialSpeed || INITIAL_SPEED);
     const velocityRef = useRef({ x: 0, y: 0 }); // Updated for vertical movement
+    // Mouse control state
+    const isMouseControlRef = useRef(false);
+    const mousePositionRef = useRef({ x: 0, y: 0 });
     // Spaceship is fixed at bottom center
     const spaceshipRef = useRef({
         x: 0,
@@ -205,6 +208,10 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
     // Add keyboard controls for left/right movement (document-level)
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            // Switch to keyboard control when arrow keys are pressed
+            if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+                isMouseControlRef.current = false;
+            }
             const maneuverSpeed = Math.min(
                 BASE_MANEUVER_SPEED + (MAX_MANEUVER_SPEED - BASE_MANEUVER_SPEED) * Math.min(1, (speedRef.current - INITIAL_SPEED) / MANEUVER_RAMP),
                 MAX_MANEUVER_SPEED
@@ -248,11 +255,37 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
             if (['ArrowLeft', 'ArrowRight'].includes(e.key)) velocityRef.current.x = 0;
             if (['ArrowUp', 'ArrowDown'].includes(e.key)) velocityRef.current.y = 0;
         };
+
+        // Mouse control handlers
+        const handleMouseDown = (e: MouseEvent) => {
+            if (gameOver) return;
+            isMouseControlRef.current = true;
+            mousePositionRef.current = { x: e.clientX, y: e.clientY };
+        };
+
+        const handleMouseMove = (e: MouseEvent) => {
+            if (gameOver || !isMouseControlRef.current) return;
+            mousePositionRef.current = { x: e.clientX, y: e.clientY };
+        };
+
+        const handleMouseUp = () => {
+            isMouseControlRef.current = false;
+            velocityRef.current = { x: 0, y: 0 };
+        };
+
+        // Add all event listeners
         document.addEventListener('keydown', handleKeyDown);
         document.addEventListener('keyup', handleKeyUp);
+        document.addEventListener('mousedown', handleMouseDown);
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+
         return () => {
             document.removeEventListener('keydown', handleKeyDown);
             document.removeEventListener('keyup', handleKeyUp);
+            document.removeEventListener('mousedown', handleMouseDown);
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
         };
     }, [gameOver, initialSpeed]);
 
@@ -271,24 +304,47 @@ const GameCanvas: React.FC<GameCanvasProps> = ({ speed: initialSpeed, onGameOver
         if (gameOver) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
+        
         // Gradually increase speed
         speedRef.current += SPEED_INCREMENT;
         // Increment score based on speed (or time)
-        scoreRef.current += 0.01 ; // Adjust multiplier as needed
+        scoreRef.current += 0.01;
+        
         // Scale spaceship size every frame
         const scaled = getScaledSpaceshipSize();
         const spaceship = spaceshipRef.current;
         spaceship.width = scaled.width;
         spaceship.height = scaled.height;
-        // Keep spaceship at bottom center
-        // spaceship.y = Math.max(0, canvas.height - scaled.height - 40);
-        // Move spaceship left/right and up/down, clamp to screen
+
+        // Handle mouse control
+        if (isMouseControlRef.current) {
+            const targetX = mousePositionRef.current.x - spaceship.width / 2;
+            const targetY = mousePositionRef.current.y - spaceship.height / 2;
+            
+            const dx = targetX - spaceship.x;
+            const dy = targetY - spaceship.y;
+            
+            // Calculate maneuver speed based on current game speed
+            const maneuverSpeed = Math.min(
+                BASE_MANEUVER_SPEED + (MAX_MANEUVER_SPEED - BASE_MANEUVER_SPEED) * Math.min(1, (speedRef.current - INITIAL_SPEED) / MANEUVER_RAMP),
+                MAX_MANEUVER_SPEED
+            );
+            
+            // Smooth movement towards mouse position
+            velocityRef.current.x = Math.abs(dx) < maneuverSpeed ? dx : Math.sign(dx) * maneuverSpeed;
+            velocityRef.current.y = Math.abs(dy) < maneuverSpeed ? dy : Math.sign(dy) * maneuverSpeed;
+        }
+
+        // Apply velocity (works for both mouse and keyboard control)
         spaceship.x += velocityRef.current.x;
         spaceship.y += velocityRef.current.y;
+
+        // Clamp position to screen bounds
         if (spaceship.x < 0) spaceship.x = 0;
         if (spaceship.x + spaceship.width > canvas.width) spaceship.x = canvas.width - spaceship.width;
         if (spaceship.y < 0) spaceship.y = 0;
         if (spaceship.y + spaceship.height > canvas.height) spaceship.y = canvas.height - spaceship.height;
+        
         // 3D starfield update
         const fov = Math.tan(CAMERA_ANGLE_RAD / 2);
         const aspect = canvas.width / canvas.height;
