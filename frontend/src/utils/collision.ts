@@ -55,7 +55,6 @@ export type Asteroid = {
   size: number;
   speed: number;
   outer: Array<{ x: number; y: number }>;
-  holes: Array<Array<{ x: number; y: number }>>;
   color: string;
   angle: number;
   spin: number;
@@ -94,18 +93,6 @@ export function checkCollision(
       };
     });
 
-    // Transform all holes
-    const transformedHoles = asteroid.holes.map(hole => 
-      hole.map((pt: { x: number; y: number }) => {
-        const rx = Math.cos(angle) * pt.x - Math.sin(angle) * pt.y;
-        const ry = Math.sin(angle) * pt.x + Math.cos(angle) * pt.y;
-        return {
-          x: proj.x + rx * scale,
-          y: proj.y + ry * scale
-        };
-      })
-    );
-
     // Check if spaceship corners are inside the asteroid
     const spaceshipCorners = [
       { x: rect.x, y: rect.y },
@@ -117,18 +104,7 @@ export function checkCollision(
     // Check each corner of the spaceship
     for (const corner of spaceshipCorners) {
       if (pointInPolygon(corner, poly)) {
-        // If corner is in asteroid, check if it's in any hole
-        let inHole = false;
-        for (const hole of transformedHoles) {
-          if (pointInPolygon(corner, hole)) {
-            inHole = true;
-            break;
-          }
-        }
-        // Only collide if not in a hole
-        if (!inHole) {
-          return true;
-        }
+        return true;
       }
     }
 
@@ -142,16 +118,7 @@ export function checkCollision(
 
     for (const point of edgeCenters) {
       if (pointInPolygon(point, poly)) {
-        let inHole = false;
-        for (const hole of transformedHoles) {
-          if (pointInPolygon(point, hole)) {
-            inHole = true;
-            break;
-          }
-        }
-        if (!inHole) {
-          return true;
-        }
+        return true;
       }
     }
 
@@ -162,16 +129,7 @@ export function checkCollision(
     };
     
     if (pointInPolygon(center, poly)) {
-      let inHole = false;
-      for (const hole of transformedHoles) {
-        if (pointInPolygon(center, hole)) {
-          inHole = true;
-          break;
-        }
-      }
-      if (!inHole) {
-        return true;
-      }
+      return true;
     }
   }
   return false;

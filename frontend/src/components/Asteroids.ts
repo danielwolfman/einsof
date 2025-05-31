@@ -6,11 +6,11 @@ export interface Asteroid {
   size: number;
   speed: number;
   outer: Array<{ x: number; y: number }>;
-  holes: Array<Array<{ x: number; y: number }>>;
   color: string;
   angle: number;
   spin: number;
   opacity: number;
+  gaveFuelBonus?: boolean;
 }
 
 export function sortAsteroidsByZ(asteroids: Asteroid[]) {
@@ -18,7 +18,8 @@ export function sortAsteroidsByZ(asteroids: Asteroid[]) {
 }
 
 export function drawAsteroids(context: CanvasRenderingContext2D, canvas: HTMLCanvasElement, asteroids: Asteroid[], projectStar: any, fov: number, aspect: number) {
-  const sorted = sortAsteroidsByZ(asteroids);
+  // Sort asteroids by Z in descending order (furthest to closest)
+  const sorted = [...asteroids].sort((a, b) => b.z - a.z);
   sorted.forEach(asteroid => {
     const proj = projectStar(asteroid, canvas, fov, aspect);
     context.save();
@@ -34,20 +35,13 @@ export function drawAsteroids(context: CanvasRenderingContext2D, canvas: HTMLCan
     context.moveTo(asteroid.outer[0].x, asteroid.outer[0].y);
     asteroid.outer.forEach((pt, i) => { if (i > 0) context.lineTo(pt.x, pt.y); });
     context.closePath();
-    asteroid.holes.forEach(hole => {
-      context.moveTo(hole[0].x, hole[0].y);
-      for (let i = hole.length - 1; i >= 0; i--) {
-        const pt = hole[i];
-        context.lineTo(pt.x, pt.y);
-      }
-      context.closePath();
-    });
+    
     const grad = context.createRadialGradient(0, 0, asteroid.size * 0.2, 0, 0, asteroid.size);
     grad.addColorStop(0, '#fff8');
     grad.addColorStop(0.2, asteroid.color);
     grad.addColorStop(1, '#222');
     context.fillStyle = grad;
-    context.fill('evenodd');
+    context.fill();
     context.globalAlpha = asteroidAlpha;
     context.lineWidth = 2;
     context.strokeStyle = '#222';
@@ -84,7 +78,7 @@ export function generateAsteroid3D(
     const sy = randCenterBias();
     const x = ((sx - 0.5) * 2 * z * fov) / aspect;
     const y = ((sy - 0.5) * 2 * z * fov);
-    const size = 1000 + Math.random() * 2000; // Increased base size and range
+    const size = 1000 + Math.random() * 2000; // Base size for solid asteroids
     const speed = minSpeed + Math.random() * (maxSpeed - minSpeed);
     const points = 18 + Math.floor(Math.random() * 6);
     const outer: Array<{ x: number; y: number }> = [];
@@ -93,49 +87,11 @@ export function generateAsteroid3D(
         const r = size * (0.85 + Math.sin(angle * 3 + Math.random() * 2) * 0.08 + Math.random() * 0.12);
         outer.push({ x: Math.cos(angle) * r, y: Math.sin(angle) * r });
     }
-    const holes: Array<Array<{ x: number; y: number }>> = [];
-    const mainHoleAngle = Math.random() * Math.PI * 2;
-    const mainHoleDist = size * 0.15 + Math.random() * size * 0.18;
-    const mainHoleCx = Math.cos(mainHoleAngle) * mainHoleDist;
-    const mainHoleCy = Math.sin(mainHoleAngle) * mainHoleDist;
-    // Ensure main hole is large enough for spaceship with padding
-    const minMainHoleW = Math.max(spaceshipWidth * 2, size * 0.35);
-    const minMainHoleH = Math.max(spaceshipHeight * 2, size * 0.35);
-    const maxMainHoleW = Math.max(minMainHoleW * 1.2, size * 0.45);
-    const maxMainHoleH = Math.max(minMainHoleH * 1.2, size * 0.45);
-    holes.push(generateAsteroidHole(mainHoleCx, mainHoleCy, minMainHoleW, minMainHoleH, maxMainHoleW, maxMainHoleH));
     
-    // Make secondary holes also potentially large enough for ship
-    const extraHoles = 1 + Math.floor(Math.random() * (3 - 1 + 1));
-    for (let i = 0; i < extraHoles; i++) {
-        const angle = Math.random() * Math.PI * 2;
-        const dist = size * 0.2 + Math.random() * size * 0.5;
-        const cx = Math.cos(angle) * dist;
-        const cy = Math.sin(angle) * dist;
-        const minW = Math.max(spaceshipWidth * 1.5, size * 0.25);
-        const minH = Math.max(spaceshipHeight * 1.5, size * 0.25);
-        const maxW = Math.max(minW * 1.2, size * 0.35);
-        const maxH = Math.max(minH * 1.2, size * 0.35);
-        holes.push(generateAsteroidHole(cx, cy, minW, minH, maxW, maxH));
-    }
     const color = `hsl(${20 + Math.random() * 30}, 30%, ${35 + Math.random() * 20}%)`;
     const angle = Math.random() * Math.PI * 2;
     const spin = (Math.random() < 0.5 ? 1 : -1) * (0.001 + Math.random() * (0.004 - 0.001));
+    // Always start fully transparent
     const opacity = 0;
-    return { x, y, z, size, speed, outer, holes, color, angle, spin, opacity };
-}
-
-function generateAsteroidHole(cx: number, cy: number, minW: number, minH: number, maxW: number, maxH: number) {
-    const holeW = minW + Math.random() * (maxW - minW);
-    const holeH = minH + Math.random() * (maxH - minH);
-    const holeAngle = Math.random() * Math.PI * 2;
-    const holePoints = 18;
-    const arr: Array<{ x: number; y: number }> = [];
-    for (let i = 0; i < holePoints; i++) {
-        const angle = holeAngle + (i / holePoints) * Math.PI * 2;
-        const rw = holeW * (0.95 + Math.sin(angle * 2 + Math.random()) * 0.04) / 2;
-        const rh = holeH * (0.95 + Math.cos(angle * 2 + Math.random()) * 0.04) / 2;
-        arr.push({ x: cx + Math.cos(angle) * rw, y: cy + Math.sin(angle) * rh });
-    }
-    return arr;
+    return { x, y, z, size, speed, outer, color, angle, spin, opacity };
 }
