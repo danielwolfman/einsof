@@ -2,7 +2,7 @@
   "name": "endless-flight-game-frontend",
   "version": "1.0.0",
   "private": true,
-  "homepage": "https://danielwolfman.github.io/einsof",
+  "homepage": "https://einsof.online",
   "scripts": {
     "start": "react-scripts start",
     "build": "CI=false DISABLE_ESLINT_PLUGIN=true react-scripts build",
